@@ -1,0 +1,302 @@
+---
+title: "Designing High Order Portfolios via Parametric Skew-t distribution"
+author: |
+  | Xiwen Wang and Daniel P. Palomar
+  | The Hong Kong University of Science and Technology (HKUST)
+date: "`r Sys.Date()`"
+output:
+  prettydoc::html_pretty:
+    theme: cayman
+    highlight: vignette
+    toc: yes
+    toc_depth: 2
+  pagedown::html_paged:
+csl: ieee.csl
+bibliography: refs.bib
+vignette: >
+  %\VignetteIndexEntry{Vignettes}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, echo=FALSE}
+library(knitr)
+opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.align = "center",
+  fig.retina = 2,
+  out.width = "85%",
+  dpi = 96 
+) 
+options(width=100)
+# rmarkdown::render("vignettes/DesignOfHighOrderPortfolios.Rmd", "prettydoc::html_pretty")
+```
+
+# Quick Start
+
+Let's first load the package:
+
+```{r setup}
+library(ParametricHighOrderPortfolios)
+```
+
+# Modeling high-order moments
+
+Though taking high-order moments into consideration in portfolio design would bring lots of benefits, for example, 
+<ul>
+<li> Positive skewness corresponds to the portfolios that are more likely to make profits, </li>
+<li> Small kurtosis indicates that the portfolios are less likely to suffer from extreme losses, </li>
+</ul>
+modeling skewness and kurtosis are non-trivial.
+
+## Non-parametric approach
+
+Conventional approach adopts the vanilla co-skewness matrix $\boldsymbol{\Phi}$ and co-kurtosis matrix $\boldsymbol{\Psi}$ to model the high-order moments. Namely, let $\mathbf{r}\in \mathbb{R}^N$ denote the log-returns of $N$ assets, $\boldsymbol{\Phi}$ and $\boldsymbol{\Psi}$ are given as
+
+$$
+\boldsymbol{\Phi}=\mathbb{E}\left[\left(\mathbf{r}-\boldsymbol{\mu}\right)\left(\mathbf{r}-\boldsymbol{\mu}\right)\otimes\left(\mathbf{r}-\boldsymbol{\mu}\right)\right],
+$$
+
+$$
+\boldsymbol{\Psi}=\mathbb{E}\left[\left(\mathbf{r}-\boldsymbol{\mu}\right)\left(\mathbf{r}-\boldsymbol{\mu}\right)\otimes\left(\mathbf{r}-\boldsymbol{\mu}\right)\otimes\left(\mathbf{r}-\boldsymbol{\mu}\right)\right],
+$$
+where $\boldsymbol{\mu}=\mathbb{E}\left[\mathbf{r}\right]$. Traditional approach often limits the Practicability of the high-order portfolios as the matrices $\boldsymbol{\Phi}$ and $\boldsymbol{\Psi}$ grows tremendously large when $N$ increases. 
+ 
+```{r echo=TRUE}
+# load the data and estimate the high-order moments via non-parametric matrices
+X_moments <- estimate_moments(X50)
+dim(X_moments$Phi_mat)
+dim(X_moments$Psi_mat)
+```
+
+As a result, when computing the skewness and kurtosis of a given portfolio $\mathbf{w}\in \mathbb{R}^N$, which are 
+
+$$
+\begin{align}
+\phi_3\left(\mathbf{w}\right) = \mathbf{w}^{T}\boldsymbol{\Phi}\left(\mathbf{w}\otimes\mathbf{w}\right),\quad  \phi_{4}\left(\mathbf{w}\right)=\mathbf{w}^{T}\boldsymbol{\Psi}\left(\mathbf{w}\otimes\mathbf{w}\otimes\mathbf{w}\right),
+\end{align}
+$$
+the computational cost would be tremendous.
+
+```{r echo=TRUE}
+library(microbenchmark)
+N <- 50
+w <- rep(1/N, N)
+microbenchmark(
+  t(w) %*% X_moments$Phi_mat %*% (w %x% w), times = 10L
+)
+```
+
+```{r echo=TRUE}
+library(microbenchmark)
+w <- rep(1/N, N)
+microbenchmark(
+  t(w) %*% X_moments$Psi_mat %*% (w %x% w %x% w), times = 10L
+) 
+```
+
+## Parametric skew-t distribution
+
+In our paper, we consider a parametric approach to represent the high-order moments. Specifically, we suppose that $\mathbf{r}$ follows a generalized hyperbolic multivariate skew-t (ghMST) distribution [@aas2006generalized], which admits the following hierarchical structure
+$$
+\begin{align}
+\mathbf{r}|\tau\,\, & \overset{\text{i.i.d}}{\sim}\,\,\mathcal{N}\left(\boldsymbol{\mu}+\frac{1}{\tau}\boldsymbol{\gamma},\frac{1}{\tau}\boldsymbol{\Sigma}\right),\\
+\tau\,\, & \overset{\text{i.i.d}}{\sim}\,\,\text{Gamma}\left(\frac{\nu}{2},\frac{\nu}{2}\right),
+\end{align}
+$$
+where $\nu\in\mathbb{R}_{++}$ is the degree of freedom, $\boldsymbol{\mu}\in\mathbb{R}^{N}$ is the location vector, $\boldsymbol{\gamma}\in\mathbb{R}^{N}$ is the skewness vector, $\boldsymbol{\Sigma}\in\mathbb{R}^{N\times N}$ is the scatter matrix. 
+
+```{r echo=TRUE}
+# load the data and estimate the high-order moments via non-parametric matrices
+X_parameters <- fit_ghMST(X50) 
+str(X_parameters, max.level = 1)
+```
+
+Therefore, we can compute the high-order moments based on the parameters fitted from the data. 
+
+$$
+\begin{align}
+\phi_{1}\left(\mathbf{w}\right)=\,&\mathbf{w}^{T}\boldsymbol{\mu}+a_{1}\mathbf{w}^{T}\boldsymbol{\gamma},\\
+\phi_{2}\left(\mathbf{w}\right)=\,&a_{21}\mathbf{w}^{T}\boldsymbol{\Sigma}\mathbf{w}+a_{22}\left(\mathbf{w}^{T}\boldsymbol{\gamma}\right)^{2},\\
+\phi_{3}\left(\mathbf{w}\right)=\,&a_{31}\left(\mathbf{w}^{T}\boldsymbol{\gamma}\right)^{3}+a_{32}\left(\mathbf{w}^{T}\boldsymbol{\gamma}\right)\left(\mathbf{w}^{T}\boldsymbol{\Sigma}\mathbf{w}\right),\\
+\phi_{4}\left(\mathbf{w}\right)=\,&a_{41}\left(\mathbf{w}^{T}\boldsymbol{\gamma}\right)^{4}+a_{42}\left(\mathbf{w}^{T}\boldsymbol{\gamma}\right)^{2}\left(\mathbf{w}^{T}\boldsymbol{\Sigma}\mathbf{w}\right) +a_{43}\left(\mathbf{w}^{T}\boldsymbol{\Sigma}\mathbf{w}\right)^{2},
+\end{align}
+$$
+
+in which $\mathbf{a}$ contains some coefficients determined by $\nu$. 
+
+```{r echo=TRUE}
+w <- rep(1/N, N)
+wT_mu <- t(w) %*% X_parameters$mu
+wT_gamma <- t(w) %*% X_parameters$gamma
+wT_Sigma_w <- sum((X_parameters$chol_Sigma %*% w) ** 2) 
+
+## Computing phi3(w)
+microbenchmark(
+  {wT_gamma <- t(w) %*% X_parameters$gamma; wT_Sigma_w <- sum((X_parameters$chol_Sigma %*% w) ** 2) ; phi3 = X_parameters$a$a31 * ((wT_gamma) ** 3) + X_parameters$a$a32 * (wT_gamma) * ( wT_Sigma_w)} , times = 10L
+) 
+
+## Computing phi4(w)
+microbenchmark(
+  {wT_gamma <- t(w) %*% X_parameters$gamma; wT_Sigma_w <- sum((X_parameters$chol_Sigma %*% w) ** 2) ; phi4 = X_parameters$a$a41 * ((wT_gamma) ** 4) + X_parameters$a$a42 * (wT_Sigma_w) * ((wT_gamma) ** 2) + X_parameters$a$a43 * ((wT_Sigma_w) ** 2)} , times = 10L
+) 
+```
+
+
+## Connections bewteen non-parametric and parametric approach
+ 
+According to lemma 1 in [@wang2022efficient], the mean, covariance, co-skewness and co-kurtosis of $\mathbf{r}$ can be computed as
+
+$$
+\mathbb{E}\left[\mathbf{r}\right]=\boldsymbol{\mu}+a_{1}\boldsymbol{\gamma},\quad \text{Cov}\left[\mathbf{r}\right] = a_{21}\boldsymbol{\Sigma}+a_{22}\boldsymbol{\gamma\gamma}^{T},
+$$
+
+$$
+\Phi_{i,\left(j-1\right)\times N+k} =a_{31}\gamma_{i}\gamma_{j}\gamma_{k}+\frac{a_{32}}{3}\left(\gamma_{i}\Sigma_{jk}+\gamma_{j}\Sigma_{ik}+\gamma_{k}\Sigma_{ij}\right), \quad i,j,k\in \{1,\dots, N\},
+$$
+$$
+\begin{align}
+\Psi_{i,\left(j-1\right)N^{2}+\left(k-1\right)N+l} &= a_{41}\gamma_{i}\gamma_{j}\gamma_{k}\gamma_{l}+\frac{a_{42}}{6}\left(\underbrace{\Sigma_{ij}\gamma_{k}\gamma_{l}+\cdots+\Sigma_{kl}\gamma_{i}\gamma_{j}}_{6\text{ items}}\right) \\
+& \quad  +\frac{a_{43}}{3}\left(\Sigma_{ij}\Sigma_{kl}+\Sigma_{ik}\Sigma_{jl}+\Sigma_{il}\Sigma_{jk}\right), \quad i,j,k,l\in \{1,\dots, N\}.
+\end{align}
+$$
+By applying the parametric approach, the information of high-order moments can be represented via a number of parameters, i.e., $\boldsymbol{\Theta}=\{\boldsymbol{\mu},\boldsymbol{\gamma},\boldsymbol{\Sigma},\nu\}$. As the number of parameters is significantly reduced, any computation based on high-order moments can be accelerated.  Here's an example:
+
+```{r echo=TRUE}
+equivalent_moments <- Compute_equivalent_moments(X_parameters)
+str(equivalent_moments, max.level = 1)
+```
+
+```{r echo=TRUE}
+w <- rep(1/N, N)
+phi4_non_parametric <- t(w) %*% equivalent_moments$Psi_mat %*% (w %x% w %x% w)
+
+wT_gamma <- t(w) %*% X_parameters$gamma
+wT_Sigma_w <- sum((X_parameters$chol_Sigma %*% w) ** 2) 
+phi4_skew_t <- X_parameters$a$a41 * ((wT_gamma) ** 4) + X_parameters$a$a42 * (wT_Sigma_w) * ((wT_gamma) ** 2) + X_parameters$a$a43 * ((wT_Sigma_w) ** 2)
+
+sum(abs(phi4_non_parametric - phi4_skew_t))
+```
+
+# Using the Package **ParametricHighOrderPortfolios**
+
+## Estimating the parameters of a ghMST distribution
+
+Instead of using sample moments to represents high-order moments, we can assume the returns follow a ghMST distribution. With the help of R package **fitHeavyTail**, we can easily obtain the estimated parameters and compute the related coefficients. In our package, these can be done via function `fit_ghMST()`.
+
+```{r echo=TRUE}
+X100_parameters <- ParametricHighOrderPortfolios::fit_ghMST(X100)
+```
+
+## Solving MVSK portfolio
+
+A simple code example for solving the MVSK portfolio is presented as follows:
+
+```{r, echo=TRUE}
+# decide moment weights
+xi <- 10
+lambda <- c(1, xi/2, xi*(xi+1)/6, xi*(xi+1)*(xi+2)/24)
+
+# portfolio optimization
+sol <- solve_MVSK_skew_t(lambda, X100_parameters, method = "RFPA", tau = 10)
+sol
+```
+ 
+Check the optimized MVSK portfolio:
+
+```{r, echo=TRUE}
+library(ggplot2)
+plot_df <- data.frame(idx = 1:ncol(X100), weights = sol$w)
+  ggplot(plot_df, aes(x = idx, y = weights)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Asset indexes", y = "Portfolio weights")
+```
+We can also compare the results with the one optimized by the non-linear solver `nloptr`:
+
+```{r echo=TRUE}
+sol_nlopt <- solve_MVSK_nloptr_skewt(rep(1/100, 100), lambda, X100_parameters)
+max(sol_nlopt$w - sol$w)
+```
+
+## Comparing parametric approach with non-parametric approach
+
+The package also provides functions that produce MVSK portfolio via non-parametric modeling to the high-order moments. However, non-parametric approach often presents extremely high computational cost compared to the parametric approach. 
+
+```{r echo=TRUE}
+X100_parameters <- fit_ghMST(X100)
+X100_moments <- Compute_equivalent_moments(X100_parameters)
+
+Q_MVSK_skewt_results <- solve_MVSK_skew_t(lambda, X100_parameters, method = "Q-MVSK")
+Q_MVSK_np_results <- solve_MVSK_non_parametric(lambda, X100_moments, method = "Q-MVSK")
+
+PGD_skewt_results <- solve_MVSK_skew_t(lambda, X100_parameters, method = "PGD", initial_eta = 10)
+PGD_np_results <- solve_MVSK_non_parametric(lambda, X100_moments, method = "PGD", initial_eta = 10)
+
+RFPA_skewt_results <- solve_MVSK_skew_t(lambda, X100_parameters, method = "RFPA", tau = 10, initial_eta = 10)
+RFPA_np_results <- solve_MVSK_non_parametric(lambda, X100_moments, method = "RFPA", tau = 10, initial_eta = 10)
+```
+
+```{r echo=TRUE}
+min_obj <- min(Q_MVSK_skewt_results$objfun_vs_iterations, Q_MVSK_np_results$objfun_vs_iterations,
+               PGD_skewt_results$objfun_vs_iterations,    PGD_np_results$objfun_vs_iterations,
+               RFPA_skewt_results$objfun_vs_iterations,   RFPA_np_results$objfun_vs_iterations)
+Q_MVSK_skewt_df <- data.frame(cpu_time = Q_MVSK_skewt_results$cpu_time_vs_iterations , gap = pmax(Q_MVSK_skewt_results$objfun_vs_iterations - min_obj, 1e-16))
+Q_MVSK_np_df <- data.frame(cpu_time = Q_MVSK_np_results$cpu_time_vs_iterations , gap = pmax(Q_MVSK_np_results$objfun_vs_iterations - min_obj, 1e-16)) 
+
+PGD_skewt_df <- data.frame(cpu_time = PGD_skewt_results$cpu_time_vs_iterations , gap = pmax(PGD_skewt_results$objfun_vs_iterations - min_obj, 1e-16))
+PGD_np_df <- data.frame(cpu_time = PGD_np_results$cpu_time_vs_iterations , gap = pmax(PGD_np_results$objfun_vs_iterations - min_obj, 1e-16)) 
+
+RFPA_skewt_df <- data.frame(cpu_time = RFPA_skewt_results$cpu_time_vs_iterations , gap = pmax(RFPA_skewt_results$objfun_vs_iterations - min_obj, 1e-16))
+RFPA_np_df <- data.frame(cpu_time = RFPA_np_results$cpu_time_vs_iterations , gap = pmax(RFPA_np_results$objfun_vs_iterations - min_obj, 1e-16)) 
+
+plot_df <- rbind(Q_MVSK_np_df, PGD_np_df, RFPA_np_df,
+                 Q_MVSK_skewt_df, PGD_skewt_df, RFPA_skewt_df)
+plot_df$methods <- c(rep("Q-MVSK (non-parametric)", nrow(Q_MVSK_np_df)) ,
+                     rep("PGD (non-parametric)", nrow(PGD_np_df)),
+                     rep("RFPA (non-parametric, prop)", nrow(RFPA_np_df)),
+                     rep("Q-MVSK (skew-t)", nrow(Q_MVSK_skewt_df)),
+                     rep("PGD (skew-t)", nrow(PGD_skewt_df)),
+                     rep("RFPA (skew-t, prop)", nrow(RFPA_skewt_df)))
+plot_df$methods <- factor(plot_df$methods,
+                     levels = c("Q-MVSK (non-parametric)", "PGD (non-parametric)", "RFPA (non-parametric, prop)", 
+                                "Q-MVSK (skew-t)", "PGD (skew-t)", "RFPA (skew-t, prop)"))
+plot_df$types <- factor(c(rep("non-parametric", nrow(Q_MVSK_np_df) + nrow(RFPA_np_df) + nrow(PGD_np_df)),
+                        rep("skew-t", nrow(Q_MVSK_skewt_df) + nrow(RFPA_skewt_df) + nrow(PGD_skewt_df))))
+
+
+library(ggplot2)
+library(scales)
+
+ggplot(data=plot_df, aes(x=cpu_time, y=gap, col=methods, shape = methods)) +
+  geom_point(size = 3.5) +geom_line(size = 1)  +
+  xlab("CPU time (seconds)") + ylab("Gap")+coord_cartesian(ylim = c(1e-8,NA)) +
+  scale_color_manual(name = "Methods", values = c("Q-MVSK (non-parametric)" = "blue",
+                                                  "PGD (non-parametric)" = "springgreen", 
+                                                  "RFPA (non-parametric, prop)" = "brown",
+                                                  "Q-MVSK (skew-t)" = "steelblue",
+                                                  "PGD (skew-t)" = "green4",
+                                                  "RFPA (skew-t, prop)" = "red"
+  )) + scale_shape_manual(name = "Methods", values = c(
+    "Q-MVSK (non-parametric)" = 0, "PGD (non-parametric)" = 13, "RFPA (non-parametric, prop)" = 2, 
+    "Q-MVSK (skew-t)" = 15, "PGD (skew-t)" = 20, "RFPA (skew-t, prop)" = 17
+  )) + scale_x_log10(breaks = trans_breaks("log10", function(x) 10^x),labels = trans_format("log10", math_format(10^.x)))+
+  scale_y_log10(breaks = trans_breaks("log10", function(x) 10^x),
+                 labels = trans_format("log10", math_format(10^.x))) + labs(title = "Gap v.s. computational time (N=100)") +
+  theme(axis.text=element_text(size=12,face="bold"),
+         axis.title=element_text(size=12,face="bold"),
+         plot.title = element_text(size=12), legend.position = c(.84,.32),
+         legend.text = element_text( size=10, face="bold"))
+```
+
+
+
+# References {-}
+
+\setlength{\parindent}{-0.2in}
+\setlength{\leftskip}{0.2in}
+\setlength{\parskip}{8pt}
+\noindent
+
+
+
